@@ -1,4 +1,5 @@
 import { useState, useEffect, useMemo, FormEvent, ChangeEvent } from 'react';
+import { supabase } from './utils/supabase';
 import { 
   BarChart3, 
   CheckSquare, 
@@ -56,7 +57,7 @@ interface Project {
   checklist: ChecklistCategory[];
   notes: Note[];
   media: MediaAsset[];
-  createdAt: number;
+  created_at: number;
 }
 
 const Logo = ({ size = 32, className = "" }: { size?: number, className?: string }) => (
@@ -105,19 +106,16 @@ export default function App() {
     deadline: ''
   });
 
-  // Initialization & Persistence
+  // Initialization & Persistence from Supabase
   useEffect(() => {
-    const savedProjects = localStorage.getItem('wp_suite_projects');
-    if (savedProjects) {
-      setProjects(JSON.parse(savedProjects));
+    async function loadProjects() {
+      const { data, error } = await supabase.from('projects').select('*').order('created_at', { ascending: false });
+      if (data && !error) {
+        setProjects(data as Project[]);
+      }
     }
+    loadProjects();
   }, []);
-
-  useEffect(() => {
-    if (projects.length > 0) {
-      localStorage.setItem('wp_suite_projects', JSON.stringify(projects));
-    }
-  }, [projects]);
 
   const currentProject = projects.find(p => p.id === currentProjectId);
 
@@ -129,7 +127,7 @@ export default function App() {
     return totalItems === 0 ? 0 : Math.round((completedItems / totalItems) * 100);
   }, [currentProject]);
 
-  const handleCreateProject = (e: FormEvent) => {
+  const handleCreateProject = async (e: FormEvent) => {
     e.preventDefault();
     const project: Project = {
       id: Date.now().toString(),
@@ -140,17 +138,33 @@ export default function App() {
       checklist: INITIAL_CHECKLIST,
       notes: [],
       media: [],
-      createdAt: Date.now()
+      created_at: Date.now()
     };
-    setProjects([project, ...projects]);
-    setCurrentProjectId(project.id);
-    setShowSetup(false);
-    setNewProject({ name: '', client: '', budget: '', deadline: '' });
+    
+    // Save to Supabase
+    const { error } = await supabase.from('projects').insert([project]);
+    
+    if (!error) {
+      setProjects([project, ...projects]);
+      setCurrentProjectId(project.id);
+      setShowSetup(false);
+      setNewProject({ name: '', client: '', budget: '', deadline: '' });
+    } else {
+      console.error("Error creating project:", error);
+    }
   };
 
-  const updateCurrentProjectData = (updates: Partial<Project>) => {
+  const updateCurrentProjectData = async (updates: Partial<Project>) => {
     if (!currentProjectId) return;
+    
+    // Optimistic UI update
     setProjects(prev => prev.map(p => p.id === currentProjectId ? { ...p, ...updates } : p));
+    
+    // Sync to Supabase
+    const { error } = await supabase.from('projects').update(updates).eq('id', currentProjectId);
+    if (error) {
+      console.error("Error updating project data:", error);
+    }
   };
 
   const toggleTask = (catId: string, taskId: string) => {
