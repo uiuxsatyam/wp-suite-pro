@@ -113,6 +113,17 @@ export default function App() {
       const { data, error } = await supabase.from('projects').select('*').order('created_at', { ascending: false });
       if (data && !error) {
         setProjects(data as Project[]);
+        
+        // Restore project and view state from localStorage
+        const savedProjectId = localStorage.getItem('wp_suite_current_project_id');
+        const savedView = localStorage.getItem('wp_suite_active_view') as View;
+        const savedCategory = localStorage.getItem('wp_suite_active_category');
+        
+        if (savedProjectId && data.some(p => p.id === savedProjectId)) {
+          setCurrentProjectId(savedProjectId);
+        }
+        if (savedView) setActiveView(savedView);
+        if (savedCategory) setActiveCategory(savedCategory);
       }
     }
     loadProjects();
@@ -140,6 +151,13 @@ export default function App() {
       supabase.removeChannel(channel);
     };
   }, []);
+
+  // Save state to localStorage
+  useEffect(() => {
+    if (currentProjectId) localStorage.setItem('wp_suite_current_project_id', currentProjectId);
+    localStorage.setItem('wp_suite_active_view', activeView);
+    localStorage.setItem('wp_suite_active_category', activeCategory);
+  }, [currentProjectId, activeView, activeCategory]);
 
   const currentProject = projects.find(p => p.id === currentProjectId);
 
@@ -269,28 +287,59 @@ export default function App() {
     }, 2000);
   };
 
-  const handleFileUpload = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleFileUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !currentProject) return;
 
-    const reader = new FileReader();
-    reader.onloadend = () => {
+    try {
+      const fileExt = file.name.split('.').pop();
+      const fileName = `${currentProjectId}/${Date.now()}.${fileExt}`;
+      const filePath = `${fileName}`;
+
+      // 1. Upload to Supabase Storage
+      const { data: uploadData, error: uploadError } = await supabase.storage
+        .from('project-assets')
+        .upload(filePath, file);
+
+      if (uploadError) throw uploadError;
+
+      // 2. Get Public URL
+      const { data: { publicUrl } } = supabase.storage
+        .from('project-assets')
+        .getPublicUrl(filePath);
+
+      // 3. Update Database
       const newMedia: MediaAsset = {
         id: Date.now().toString(),
         name: file.name,
-        url: reader.result as string,
+        url: publicUrl,
         type: file.type.split('/')[1].toUpperCase(),
         size: `${(file.size / 1024 / 1024).toFixed(2)} MB`
       };
-      updateCurrentProjectData({ media: [...currentProject.media, newMedia] });
-    };
-    reader.readAsDataURL(file);
-    // Reset input
-    e.target.value = '';
+      
+      await updateCurrentProjectData({ media: [...currentProject.media, newMedia] });
+    } catch (error) {
+      console.error("Error uploading file:", error);
+      alert("Error uploading file. Make sure you have created the 'project-assets' bucket in Supabase and set it to public.");
+    } finally {
+      e.target.value = '';
+    }
   };
 
-  const deleteMedia = (id: string) => {
+  const deleteMedia = async (id: string) => {
     if (!currentProject) return;
+    
+    const mediaToDelete = currentProject.media.find(m => m.id === id);
+    if (mediaToDelete) {
+      // Try to delete from storage if it's a storage URL
+      if (mediaToDelete.url.includes('project-assets')) {
+        const path = mediaToDelete.url.split('project-assets/')[1];
+        if (path) {
+          await supabase.storage.from('project-assets').remove([path]);
+        }
+      }
+    }
+
     updateCurrentProjectData({
       media: currentProject.media.filter(m => m.id !== id)
     });
