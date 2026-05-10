@@ -1,0 +1,10 @@
+{
+  "name": "WP-Suite PRO",
+  "description": "Professional client dashboard for WordPress design & development projects. Track progress, manage checklists, add notes, and collaborate on project deliverables.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "Project management",
+    "Real-time tracking",
+    "Asset management"
+  ]
+}
