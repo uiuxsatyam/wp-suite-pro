@@ -97,6 +97,7 @@ export default function App() {
     catId?: string;
     title: string;
   } | null>(null);
+  const [previewMedia, setPreviewMedia] = useState<MediaAsset | null>(null);
 
   // New Project Form State
   const [newProject, setNewProject] = useState({
@@ -115,6 +116,29 @@ export default function App() {
       }
     }
     loadProjects();
+
+    const channel = supabase
+      .channel('schema-db-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'projects' },
+        (payload) => {
+          if (payload.eventType === 'INSERT') {
+            const newProject = payload.new as Project;
+            setProjects(prev => prev.find(p => p.id === newProject.id) ? prev : [newProject, ...prev]);
+          } else if (payload.eventType === 'UPDATE') {
+            const updatedProject = payload.new as Project;
+            setProjects(prev => prev.map(p => p.id === updatedProject.id ? updatedProject : p));
+          } else if (payload.eventType === 'DELETE') {
+            setProjects(prev => prev.filter(p => p.id !== payload.old.id));
+          }
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, []);
 
   const currentProject = projects.find(p => p.id === currentProjectId);
@@ -625,9 +649,9 @@ export default function App() {
                             {item.completed ? (
                               <span className="text-[8px] md:text-[10px] font-bold text-emerald-500 bg-emerald-50 px-2 py-1 rounded-full uppercase">Verified</span>
                             ) : (
-                              <div className="hidden md:flex gap-3 px-2">
-                                <span className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-300"><ImageIcon size={14} /></span>
-                                <span className="opacity-0 group-hover:opacity-100 transition-opacity text-blue-500 text-[10px] font-bold uppercase tracking-wider">Execute</span>
+                              <div className="flex gap-2 md:gap-3 px-2">
+                                <span className="md:opacity-0 group-hover:opacity-100 transition-opacity text-slate-300"><ImageIcon size={14} /></span>
+                                <span className="md:opacity-0 group-hover:opacity-100 transition-opacity text-blue-500 text-[10px] font-bold uppercase tracking-wider">Execute</span>
                               </div>
                             )}
                             <button 
@@ -640,7 +664,7 @@ export default function App() {
                                   title: item.task
                                 });
                               }}
-                              className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all opacity-0 group-hover:opacity-100"
+                              className="w-8 h-8 rounded-lg flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all md:opacity-0 group-hover:opacity-100"
                             >
                               <Trash2 size={14} />
                             </button>
@@ -663,7 +687,7 @@ export default function App() {
                       <div className="text-[10px] font-bold mt-2 uppercase tracking-widest text-slate-500 group-hover:text-blue-600 text-center px-2">Upload Asset</div>
                     </label>
                     {currentProject.media.map(item => (
-                      <div key={item.id} className="relative aspect-[4/3] rounded-2xl overflow-hidden border border-slate-200 group bg-slate-100">
+                      <div key={item.id} className="relative aspect-[4/3] rounded-2xl overflow-hidden border border-slate-200 group bg-slate-100 cursor-pointer" onClick={() => setPreviewMedia(item)}>
                         <img 
                           src={item.url} 
                           alt={item.name} 
@@ -676,7 +700,7 @@ export default function App() {
                             <span className="text-[7px] text-blue-300 font-bold uppercase tracking-widest">{item.size}</span>
                           </div>
                           <button 
-                            onClick={() => deleteMedia(item.id)}
+                            onClick={(e) => { e.stopPropagation(); deleteMedia(item.id); }}
                             className="p-1 bg-red-500/20 hover:bg-red-500 text-red-500 hover:text-white rounded transition-all shrink-0"
                           >
                             <Trash2 size={10} />
@@ -890,6 +914,46 @@ export default function App() {
                 </button>
               </div>
             </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+      <AnimatePresence>
+        {previewMedia && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-slate-900/90 backdrop-blur-md z-[300] flex items-center justify-center p-4 md:p-8"
+            onClick={() => setPreviewMedia(null)}
+          >
+            <div className="relative w-full max-w-5xl max-h-full flex flex-col items-center justify-center" onClick={e => e.stopPropagation()}>
+              <div className="absolute -top-12 md:-top-16 right-0 flex gap-4">
+                <a 
+                  href={previewMedia.url} 
+                  download={previewMedia.name}
+                  className="w-10 h-10 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white backdrop-blur transition-all"
+                  title="Download"
+                  onClick={e => e.stopPropagation()}
+                >
+                  <Download size={20} />
+                </a>
+                <button 
+                  onClick={() => setPreviewMedia(null)}
+                  className="w-10 h-10 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white backdrop-blur transition-all"
+                >
+                  <X size={20} />
+                </button>
+              </div>
+              <img 
+                src={previewMedia.url} 
+                alt={previewMedia.name} 
+                className="max-w-full max-h-[85vh] object-contain rounded-lg shadow-2xl" 
+              />
+              <div className="mt-4 text-white text-center">
+                <p className="font-bold">{previewMedia.name}</p>
+                <p className="text-xs text-slate-400 mt-1">{previewMedia.size}</p>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
